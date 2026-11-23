@@ -1,15 +1,17 @@
 // Trend rider for cbBTC on 1-minute bars (agent-fun/bars-replay/v1).
 //
 // Idea: ride medium-term momentum and cut losers fast. The bot watches two
-// exponential moving averages of the close (fast 12 bars, slow 48 bars) and
+// exponential moving averages of the close (fast 60 bars, slow 240 bars) and
 // only buys when the fast average sits clearly above the slow one, the last
-// 30 bars agree with the direction, and the market is not in a steep
-// four-hour slide. Once long, it holds until the fast average crosses back
-// under the slow one or the price pulls back 90 bps from the best close
+// 120 bars agree with the direction, and the market is not in a steep
+// eight-hour slide. Once long, it holds until the fast average crosses back
+// under the slow one or the price pulls back 250 bps from the best close
 // seen since entry. Every trade is a full-size round trip (about 26 bps in
 // fees, slippage and impact), so entries demand a confirmed trend, not a
-// single noisy bar, and a short cooling-off period after each exit keeps
-// the bot from churning on whipsaws.
+// single noisy bar, and a cooling-off period after each exit keeps the bot
+// from churning on whipsaws. If the bot has still not traded by the last
+// hour it takes one probe trade, so it always meets the race's one-trade
+// guardrail instead of sitting out a falling market entirely.
 //
 // Only the standard library and the vendored kit shim are used. No clock,
 // no environment, no randomness: the same bars always produce the same
@@ -21,20 +23,20 @@ import type { BarsState, Batch } from './vendor/makefun-bars.ts';
 const SYMBOL = 'CBBTC';
 
 // Strategy knobs, all in basis points unless noted.
-const FAST_SPAN = 12;
-const SLOW_SPAN = 48;
-const ENTRY_GAP_BPS = 6; // fast must clear slow by this much to buy
-const TRAIL_BPS = 90; // sell when close falls this far below the peak since entry
-const HARD_STOP_BPS = 150; // sell when close falls this far below entry cost
-const OVEREXTENDED_BPS = 200; // do not chase a close this far above the slow average
-const MIN_HISTORY_BARS = 60; // bars of closes before the first entry
-const COOLDOWN_BARS = 10; // bars to wait after an exit before re-entering
-const MIN_BARS_LEFT = 40; // stop opening new trades this close to the end
-const SHORT_WINDOW = 30; // bars for the short momentum check
-const REGIME_WINDOW = 240; // bars for the four-hour regime check
-const REGIME_FLOOR_BPS = -100; // skip entries in a steep four-hour slide
+const FAST_SPAN = 60;
+const SLOW_SPAN = 240;
+const ENTRY_GAP_BPS = 30; // fast must clear slow by this much to buy
+const TRAIL_BPS = 250; // sell when close falls this far below the peak since entry
+const HARD_STOP_BPS = 300; // sell when close falls this far below entry cost
+const OVEREXTENDED_BPS = 400; // do not chase a close this far above the slow average
+const MIN_HISTORY_BARS = 260; // bars of closes before the first entry
+const COOLDOWN_BARS = 30; // bars to wait after an exit before re-entering
+const MIN_BARS_LEFT = 60; // stop opening new trades this close to the end
+const SHORT_WINDOW = 120; // bars for the short momentum check
+const REGIME_WINDOW = 480; // bars for the eight-hour regime check
+const REGIME_FLOOR_BPS = -50; // skip entries in a steep eight-hour slide
 const VOL_WINDOW = 60; // bars for the volatility floor
-const VOL_FLOOR_BPS = 3; // skip entries when 1-minute moves average less than this
+const VOL_FLOOR_BPS = 2; // skip entries when 1-minute moves average less than this
 const BUY_FRACTION_NUM = 99n; // spend 99% of cash, keeping a hair for fees
 const BUY_FRACTION_DEN = 100n;
 const MAX_SLIPPAGE_BPS = 200; // guard against gap opens at the next bar
@@ -145,7 +147,21 @@ await runBars({
       const cash = state.cash;
       if (cash <= 0n) return [];
       const notional = (cash * BUY_FRACTION_NUM) / BUY_FRACTION_DEN;
-      console.error(`seq ${batch.seq}: buy ${notional} @ ${close.toFixed(2)} (gap ${gapBps.toFixed(1)}bps, 30b ${shortBps.toFixed(1)}bps)`);
+      console.error(`seq ${batch.seq}: buy ${notional} @ ${close.toFixed(2)} (gap ${gapBps.toFixed(1)}bps, 120b ${shortBps.toFixed(1)}bps)`);
+      ruler.entryCost = close;
+      ruler.peakSinceEntry = close;
+      ruler.trades++;
+      return [{ side: 'buy', symbol: SYMBOL, notional_quote_units: notional, max_slippage_bps: MAX_SLIPPAGE_BPS }];
+    }
+
+    // Probe trade: never end a window with zero trades, or the entry fails
+    // the race's one-trade guardrail. One buy in the last hour, held to the
+    // flatten at the end, costs about one round trip at most.
+    if (ruler.trades === 0 && batch.seq >= 1380) {
+      const cash = state.cash;
+      if (cash <= 0n) return [];
+      const notional = (cash * BUY_FRACTION_NUM) / BUY_FRACTION_DEN;
+      console.error(`seq ${batch.seq}: probe buy ${notional} @ ${close.toFixed(2)} (no trade yet)`);
       ruler.entryCost = close;
       ruler.peakSinceEntry = close;
       ruler.trades++;
