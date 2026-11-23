@@ -1,0 +1,24 @@
+Build a BTC trading bot for the make.fun bounty "Race a BTC trading bot live
+for 24 hours" (slug btc-race-24h-20261123-0511). Total prize $50 in USDC on
+Solana, top 10 paid: 1st $12, 2nd $8, 3rd $6, 4th $5, 5th $4, 6th-10th $3
+each. Entries close 2026-11-23T11:11:00Z, result due 2026-12-16. The goal
+is not just a complete entry but a place inside the paid top 10.
+
+The bot trades Coinbase Wrapped BTC (cbBTC) against USDC on 1-minute bars
+in the bars-replay/v1 harness, starting from $1,000 paper money, long only,
+no leverage, one open position at most. A full round trip costs about
+26 bps in fees, slippage and price impact, so every trade must catch a
+move bigger than that. The entry must make money on the published dev
+window or it does not race at all.
+
+What was built: a Node 22 bot (main.ts, erasable TypeScript, standard
+library only plus the kit's vendored protocol shim) that rides medium-term
+momentum. It tracks a fast 12-bar and a slow 48-bar exponential moving
+average of the close, buys at full size only when the fast average clears
+the slow one by a confirmation band with the last 30 bars and the
+four-hour regime agreeing, and exits on a cross back, a 90 bps trailing
+stop from the post-entry peak, or a 1.5% hard stop. It never reads the
+clock, the environment or randomness, so two runs on the same bars agree
+byte for byte. The repository also holds the MIT license, the make.fun
+claim file naming the payout wallet, a README with the three live
+make.fun badges, and this brief.
